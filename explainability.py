@@ -9,7 +9,6 @@ import tensorflow as tf
 import torch.nn as nn
 
 
-
 def algorithm_class_score(clf, verbose = False):
     """
     Explainability score based on the model class. More complex models, will have a lower score.
@@ -54,26 +53,26 @@ def algorithm_class_score(clf, verbose = False):
     return None
 
 
-def correlated_features_score(test_data, thresholds=[0.05, 0.16, 0.28, 0.4], target_column=None, verbose=False):
-
+def correlated_features_score(dataset, thresholds=[0.05, 0.16, 0.28, 0.4], target_column=None, verbose=False):
     """
     Correlaation score from test and train data. The higher the score, the smaller the percentage of features with high 
     coorelation in relation to the average coorelation.
-        :param test_data: testing dataset
+        :param dataset: testing dataset
         :param thresholds: bin thresholds for normalization
         :param target_column: if not None, target column will be excluded
         :param verbose: show features with high coorelation
         :return: normalized score of [1, 5]
     """
-    if type(test_data) != 'pandas.core.frame.DataFrame':
-        test_data = pd.DataFrame(test_data)
 
-    test_data = copy.deepcopy(test_data)
+    if type(dataset) != 'pandas.core.frame.DataFrame':
+        dataset = pd.DataFrame(dataset)
+
+    dataset = copy.deepcopy(dataset)
      
     if target_column:
-        X_test = test_data.drop(target_column, axis=1)
+        X_test = dataset.drop(target_column, axis=1)
     else:
-        X_test = test_data.iloc[:,:-1]
+        X_test = dataset.iloc[:,:-1]
 
     X_test = X_test._get_numeric_data()
     corr_matrix =X_test.corr().abs()
@@ -90,13 +89,16 @@ def correlated_features_score(test_data, thresholds=[0.05, 0.16, 0.28, 0.4], tar
     if verbose: print(f"Removed features: {to_drop}")
     
     pct_drop = len(to_drop)/len(X_test.columns)
-    score = 5-np.digitize(pct_drop, thresholds, right=True) 
+    #score = 5-np.digitize(pct_drop, thresholds, right=True) 
     
-    return score
+    return (1 - pct_drop)
 
 
-def model_size_score(test_data, thresholds = [10,30,100,500]):
-    dist_score = 5- np.digitize(test_data.shape[1]-1 , thresholds, right=True) # -1 for the id?
+def model_size_score(dataset, thresholds = [10,30,100,500]):
+    # add comment
+    # if NN then return n_parameters
+    # else
+    dist_score = 5- np.digitize(dataset.shape[1]-1 , thresholds, right=True) # -1 for the id?
     return dist_score
 
 
@@ -113,7 +115,6 @@ def feature_importance_score(clf, thresholds = [0.05, 0.1, 0.2, 0.3]):
     regression = ['LogisticRegression', 'LogisticRegression']
     classifier = ['RandomForestClassifier', 'DecisionTreeClassifier']
 
-    # Feature Importance for Regressions 
     if (type(clf).__name__ in regression) or (get_close_matches(type(clf).__name__, regression, n=1, cutoff=0.6)): 
         importance = clf.coef_.flatten()
 
@@ -124,7 +125,6 @@ def feature_importance_score(clf, thresholds = [0.05, 0.1, 0.2, 0.3]):
         for i in range(len(importance)):
             importance[i] = abs(importance[i]) / total
 
-    # Feature Importance fo Random Forest, model needs to be fitted
     elif  (type(clf).__name__ in classifier) or (get_close_matches(type(clf).__name__, classifier, n=1, cutoff=0.6)):
         importance = clf.feature_importances_
    
@@ -138,34 +138,36 @@ def feature_importance_score(clf, thresholds = [0.05, 0.1, 0.2, 0.3]):
     
     # percentage of features that concentrate distri_threshold percent of all importance
     pct_dist = sum(np.cumsum(importance) < distri_threshold) / len(importance)
-    score = np.digitize(pct_dist, thresholds, right=False) + 1 
+    #score = np.digitize(pct_dist, thresholds, right=False) + 1 
     
-    return score
+    return pct_dist
 
 
 def predict(model):
     return model.predict_proba if hasattr(model, 'predict_proba') else model.predict
 
 
-def cv_shap_score(clf, test_data):
+def cv_shap_score(clf, dataset):
     """
     Coefficient of variance from the shap values of the features.
         :param clf: the classifier
-        :param test_data: testing data
+        :param dataset: testing data
 
     """
      
     # Create a background dataset (subset of your training data)
-    background = shap.sample(test_data, 100)  # Using 100 samples for background
+    background = shap.sample(dataset, 100)  # Using 100 samples for background
 
     # Initialize KernelExplainer with the prediction function and background dataset
     explainer = shap.KernelExplainer(predict(clf), background)
 
     # Calculate SHAP values for the dataset you want to explain
-    shap_values = explainer.shap_values(test_data.iloc[0])
+    shap_values = explainer.shap_values(dataset.iloc[0])
   
     # calculare variance of absolute shap values 
     if shap_values is not None and len(shap_values) > 0:
         sums = np.array([abs(shap_values[i]).sum() for i in range(len(shap_values))])
         cv = np.std(sums) / np.mean(sums)
         return cv
+    
+    else: return None
