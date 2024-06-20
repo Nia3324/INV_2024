@@ -13,7 +13,7 @@ def algorithm_class_score(clf, verbose = False):
     """
     Explainability score based on the model class. More complex models, will have a lower score.
         :param clf: the classifier 
-        :return: normalized score of [1, 5]
+        :return: normalized score of [0, 1]
     """
     # Based on literature research and qualitative analysis of each learning technique. For more information see gh-pages/explainability/taxonomy
     alg_score = {
@@ -36,32 +36,32 @@ def algorithm_class_score(clf, verbose = False):
     # Check if the clf_name is in the dictionary
     if clf_name in alg_score:
         exp_score = alg_score[clf_name]
-        return exp_score 
+        return (exp_score/5) 
 
     # Check if the model is a Neural Network
     if isinstance(clf, tf.keras.Model) or isinstance(clf, tf.Module) or isinstance(clf, nn.Module):
-        return 1
+        return (1/5)
     
     # If not, try to find a close match
     close_matches = get_close_matches(clf_name, alg_score.keys(), n=1, cutoff=0.6)
     if close_matches:
         exp_score = alg_score[close_matches[0]]
-        return exp_score
+        return (exp_score/5)
     
     # If no close match found 
     print(f"No matching score found for '{clf_name}'")
     return None
 
 
-def correlated_features_score(dataset, thresholds=[0.05, 0.16, 0.28, 0.4], target_column=None, verbose=False):
+def correlated_features_score(dataset, target_column=None, verbose=False):
     """
-    Correlaation score from test and train data. The higher the score, the smaller the percentage of features with high 
+    Correlaation score from data. The higher the score, the smaller the percentage of features with high 
     coorelation in relation to the average coorelation.
         :param dataset: testing dataset
         :param thresholds: bin thresholds for normalization
         :param target_column: if not None, target column will be excluded
         :param verbose: show features with high coorelation
-        :return: normalized score of [1, 5]
+        :return: correlaation score [float]
     """
 
     if type(dataset) != 'pandas.core.frame.DataFrame':
@@ -89,25 +89,32 @@ def correlated_features_score(dataset, thresholds=[0.05, 0.16, 0.28, 0.4], targe
     if verbose: print(f"Removed features: {to_drop}")
     
     pct_drop = len(to_drop)/len(X_test.columns)
-    #score = 5-np.digitize(pct_drop, thresholds, right=True) 
-    
     return (1 - pct_drop)
 
 
-def model_size_score(dataset, thresholds = [10,30,100,500]):
+def model_size_score(clf, dataset):
+    """
+    Model size based on the algorithm chosen.
+        :param clf: the classifier 
+        :param dataset: used to calculate the number of features for certain models
+        :return: number of parameters of a deep learning model, else number of features used during testing [integer]
+    """
     # add comment
-    # if NN then return n_parameters
-    # else
-    dist_score = 5- np.digitize(dataset.shape[1]-1 , thresholds, right=True) # -1 for the id?
-    return dist_score
+    if isinstance(clf, tf.keras.Model):
+        return (clf.count_params())
+    elif isinstance(clf, tf.Module) or isinstance(clf, nn.Module):
+        return (sum(p.numel() for p in clf.parameters()))
+    else:
+        return (dataset.shape[1]-1)
+    
+    # random forest and trees: number of nodes
 
 
-def feature_importance_score(clf, thresholds = [0.05, 0.1, 0.2, 0.3]):
+def feature_importance_score(clf):
     """
     Percentage of features that concentrates the majority of all importance.
         :param clf: the classifier 
-        :param thresholds: bin thresholds for normalization
-        :return: normalized score of [1, 5]
+        :return: percentage value [float]
     """
 
     distri_threshold = 0.5
@@ -138,7 +145,6 @@ def feature_importance_score(clf, thresholds = [0.05, 0.1, 0.2, 0.3]):
     
     # percentage of features that concentrate distri_threshold percent of all importance
     pct_dist = sum(np.cumsum(importance) < distri_threshold) / len(importance)
-    #score = np.digitize(pct_dist, thresholds, right=False) + 1 
     
     return pct_dist
 
@@ -152,6 +158,7 @@ def cv_shap_score(clf, dataset):
     Coefficient of variance from the shap values of the features.
         :param clf: the classifier
         :param dataset: testing data
+        :return: coefficient of variance [float]
 
     """
      
