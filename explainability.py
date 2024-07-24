@@ -9,122 +9,202 @@ import tensorflow as tf
 import torch.nn as nn
 
 
-def algorithm_class_score(clf, verbose = False):
+def algorithm_class_score(model, verbose=False):
     """
-    Explainability score based on the model class. More complex models, will have a lower score.
-        :param clf: the classifier 
-        :return: normalized score of [0, 1]
+    Calculate a score for a given classifier based on a predefined scoring system.
+    
+    Parameters:
+    model : object
+        The classifier object for which the score is to be calculated.
+    verbose : bool, optional
+        If True, prints the name of the classifier. Default is False.
+
+    Returns:
+    float or None
+        A normalized score (between 0 and 1) representing the quality or 
+        expected performance of the classifier, or None if the classifier 
+        type is not recognized.
     """
-    # Based on literature research and qualitative analysis of each learning technique. For more information see gh-pages/explainability/taxonomy
+
+    # Dictionary mapping classifier names to their respective scores
     alg_score = {
-    "RandomForestClassifier": 4,
-    "KNeighborsClassifier": 3,
-    "SVC": 2,
-    "GaussianProcessClassifier": 3,
-    "DecisionTreeClassifier": 5,
-    "MLPClassifier": 1,
-    "AdaBoostClassifier": 3,
-    "GaussianNB": 3.5,
-    "QuadraticDiscriminantAnalysis": 3,
-    "LogisticRegression": 4,
-    "LinearRegression": 3.5,
+        "RandomForestClassifier": 4,
+        "KNeighborsClassifier": 3,
+        "SVC": 2,
+        "GaussianProcessClassifier": 3,
+        "DecisionTreeClassifier": 5,
+        "MLPClassifier": 1,
+        "AdaBoostClassifier": 3,
+        "GaussianNB": 3.5,
+        "QuadraticDiscriminantAnalysis": 3,
+        "LogisticRegression": 4,
+        "LinearRegression": 3.5,
     }
 
-    clf_name = type(clf).__name__
-    if verbose: print(clf_name)
+    # Get the name of the classifier class
+    model_name = type(model).__name__
 
-    # Check if the clf_name is in the dictionary
-    if clf_name in alg_score:
-        exp_score = alg_score[clf_name]
-        return (exp_score/5) 
+    if verbose: 
+        print(model_name)
 
-    # Check if the model is a Neural Network
-    if isinstance(clf, tf.keras.Model) or isinstance(clf, tf.Module) or isinstance(clf, nn.Module):
-        return (1/5)
+    # Check if the classifier name is in the alg_score dictionary
+    if model_name in alg_score:
+        exp_score = alg_score[model_name]
+        return (exp_score)  
+
+    # Check if the classifier is a type of neural network
+    if isinstance(model, tf.keras.Model) or isinstance(model, tf.Module) or isinstance(model, nn.Module):
+        return (1 / 5)  # Return a normalized score of 0.2 for neural networks
     
-    # If not, try to find a close match
-    close_matches = get_close_matches(clf_name, alg_score.keys(), n=1, cutoff=0.6)
+    # If classifier name is not found, try to find a close match
+    close_matches = get_close_matches(model_name, alg_score.keys(), n=1, cutoff=0.6)
     if close_matches:
         exp_score = alg_score[close_matches[0]]
-        return (exp_score/5)
+        return (exp_score) 
     
-    # If no close match found 
-    print(f"No matching score found for '{clf_name}'")
+    # If no match is found, return None
+    if verbose:
+        print(f"No matching score found for '{model_name}'")
     return None
 
 
 def correlated_features_score(dataset, target_column=None, verbose=False):
     """
-    Correlaation score from data. The higher the score, the smaller the percentage of features with high 
-    coorelation in relation to the average coorelation.
-        :param dataset: testing dataset
-        :param thresholds: bin thresholds for normalization
-        :param target_column: if not None, target column will be excluded
-        :param verbose: show features with high coorelation
-        :return: correlaation score [float]
-    """
+    Calculate a score based on the proportion of highly correlated features in a dataset.
+    
+    Parameters:
+    dataset : pandas.DataFrame or array-like
+        The input dataset containing features and possibly a target column.
+    target_column : str, optional
+        The name of the target column to be excluded from the correlation analysis. 
+        If None, the last column of the dataset is assumed to be the target.
+    verbose : bool, optional
+        If True, prints the names of the removed features due to high correlation. Default is False.
 
+    Returns:
+    float
+        A score representing the proportion of features that are not highly correlated. 
+        The score ranges from 0 to 1, where 1 means no features were removed due to high correlation.
+    """
+    # Ensure the dataset is a pandas DataFrame
     if type(dataset) != 'pandas.core.frame.DataFrame':
         dataset = pd.DataFrame(dataset)
 
+    # Make a deep copy of the dataset to avoid modifying the original data
     dataset = copy.deepcopy(dataset)
-     
+    
+    # Exclude the target column from the features to be analyzed
     if target_column:
         X_test = dataset.drop(target_column, axis=1)
     else:
-        X_test = dataset.iloc[:,:-1]
+        X_test = dataset.iloc[:, :-1]
 
+    # Retain only numeric data for correlation analysis
     X_test = X_test._get_numeric_data()
-    corr_matrix =X_test.corr().abs()
+    # Compute the absolute correlation matrix
+    corr_matrix = X_test.corr().abs()
 
-    # Select upper triangle of correlation matrix
+    # Select the upper triangle of the correlation matrix to avoid duplicate pairs
     upper = corr_matrix.where(np.triu(np.ones(corr_matrix.shape), k=1).astype(np.bool))
     
-    # Compute average and standar deviation from upper correlation matrix 
-    avg_corr = upper.values[np.triu_indices_from(upper.values,1)].mean()
-    std_corr = upper.values[np.triu_indices_from(upper.values,1)].std()
+    # Compute the average and standard deviation of the correlations in the upper triangle
+    avg_corr = upper.values[np.triu_indices_from(upper.values, 1)].mean()
+    std_corr = upper.values[np.triu_indices_from(upper.values, 1)].std()
 
-    # Find features with correlation greater than avg_corr + std_corr
+    # Identify features with correlations greater than avg_corr + std_corr
     to_drop = [column for column in upper.columns if any(upper[column] > (avg_corr + std_corr))]
-    if verbose: print(f"Removed features: {to_drop}")
+    if verbose: 
+        print(f"Features with high correlation: {to_drop}")
     
-    pct_drop = len(to_drop)/len(X_test.columns)
-    return (1 - pct_drop)
+    # Calculate the proportion of features removed due to high correlation
+    pct_drop = len(to_drop) / len(X_test.columns)
+    return (1 - pct_drop)  # Return the score as the proportion of non-highly correlated features
 
 
-def model_size_score(clf, dataset):
+def model_size(model, test_dataset=None):
     """
-    Model size based on the algorithm chosen.
-        :param clf: the classifier 
-        :param dataset: used to calculate the number of features for certain models
-        :return: number of parameters of a deep learning model, else number of features used during testing [integer]
+    Calculate the size of a machine learning model based on its type.
+    
+    Parameters:
+    model : object
+        The machine learning model whose size needs to be determined.
+    test_dataset : array-like, optional
+        A test dataset to be used for certain types of models.
+
+    Returns:
+    int or str or None
+        The size of the model, which can be the number of parameters, 
+        the number of nodes, the number of support vectors, or the 
+        number of features seen in fit, depending on the model type.
     """
-    # add comment
-    if isinstance(clf, tf.keras.Model):
-        return (clf.count_params())
-    elif isinstance(clf, tf.Module) or isinstance(clf, nn.Module):
-        return (sum(p.numel() for p in clf.parameters()))
+    
+    # If the model is a TensorFlow Keras Model, return the count of parameters
+    if isinstance(model, tf.keras.Model):
+        return model.count_params()
+    
+    # If the model is a TensorFlow Module or PyTorch Module, return the sum of parameters
+    elif isinstance(model, tf.Module) or isinstance(model, nn.Module):
+        return sum(p.numel() for p in model.parameters())
+    
+    # If the model has 'estimators_', typically an ensemble model like RandomForest
+    elif hasattr(model, 'estimators_'):
+        count = 0
+        for i, est in enumerate(model.estimators_):
+            # If the estimator has a tree structure, add the number of nodes
+            if hasattr(est, 'tree_'):
+                count += est.tree_.node_count
+            # If the estimator has support vectors, add their count
+            elif hasattr(est, 'n_support_'):
+                count += sum(est.n_support_)
+        return count
+    
+    # If the model is a Support Vector Classifier
+    elif hasattr(model, 'SVC'):
+        return sum(model.n_support_)
+
+    # If the model has a tree structure, return the number of nodes
+    elif hasattr(model, 'tree_'):
+        return model.tree_.node_count
+    
+    # Return the number of features seen during fit if applicable
+    elif hasattr(model, 'n_features_in_'):
+        return 'n_features_in_'
+    
+    # If a test dataset is provided, return the number of features in the dataset
+    elif test_dataset is not None:
+        return test_dataset.shape[1]
+    
+    # If none of the above conditions are met, return None
     else:
-        return (dataset.shape[1]-1)
+        return None
+
+
+def feature_importance_score(model):
+    """
+    Calculate the feature importance score for a given classifier.
     
-    # random forest and trees: number of nodes
+    Parameters:
+    model : object
+        The classifier whose feature importance needs to be calculated.
 
-
-def feature_importance_score(clf):
+    Returns:
+    float or None
+        The percentage of features that concentrate a specified threshold 
+        of the total importance, or None if the classifier type is not supported.
     """
-    Percentage of features that concentrates the majority of all importance.
-        :param clf: the classifier 
-        :return: percentage value [float]
-    """
 
-    distri_threshold = 0.5
+    distri_threshold = 0.5  # Threshold for cumulative distribution of feature importance
 
-    regression = ['LogisticRegression', 'LogisticRegression']
+    # Lists of model names for regression and classification
+    regression = ['LogisticRegression', 'LogisticRegression']  # Likely a typo, should be ['LogisticRegression']
     classifier = ['RandomForestClassifier', 'DecisionTreeClassifier']
 
-    if (type(clf).__name__ in regression) or (get_close_matches(type(clf).__name__, regression, n=1, cutoff=0.6)): 
-        importance = clf.coef_.flatten()
+    # Check if the classifier is a regression model
+    if (type(model).__name__ in regression) or (get_close_matches(type(model).__name__, regression, n=1, cutoff=0.6)):
+        # Get the feature importance for regression models (coefficients)
+        importance = model.coef_.flatten()
 
+        # Normalize the importance values to sum to 1
         total = 0
         for i in range(len(importance)):
             total += abs(importance[i])
@@ -132,49 +212,73 @@ def feature_importance_score(clf):
         for i in range(len(importance)):
             importance[i] = abs(importance[i]) / total
 
-    elif  (type(clf).__name__ in classifier) or (get_close_matches(type(clf).__name__, classifier, n=1, cutoff=0.6)):
-        importance = clf.feature_importances_
-   
+    # Check if the classifier is a classification model
+    elif (type(model).__name__ in classifier) or (get_close_matches(type(model).__name__, classifier, n=1, cutoff=0.6)):
+        # Get the feature importance for classification models
+        importance = model.feature_importances_
+    
     else:
-        return None
+        return None  # Return None if the classifier type is not supported
 
-    # absolut values
-    importance = importance
-    indices = np.argsort(importance)[::-1] # indice of the biggest value in the importance list
+    # Sort the importance values in descending order
+    indices = np.argsort(importance)[::-1]
     importance = importance[indices]
     
-    # percentage of features that concentrate distri_threshold percent of all importance
+    # Calculate the percentage of features that concentrate distri_threshold percent of the total importance
     pct_dist = sum(np.cumsum(importance) < distri_threshold) / len(importance)
     
     return pct_dist
 
 
 def predict(model):
+    """
+    Get the prediction function of a model.
+    
+    Parameters:
+    model : object
+        The machine learning model.
+
+    Returns:
+    function
+        The model's probability prediction function if available, 
+        otherwise the standard prediction function.
+    """
     return model.predict_proba if hasattr(model, 'predict_proba') else model.predict
 
 
-def cv_shap_score(clf, dataset):
+def cv_shap_score(model, test_dataset):
     """
-    Coefficient of variance from the shap values of the features.
-        :param clf: the classifier
-        :param dataset: testing data
-        :return: coefficient of variance [float]
+    Calculate the coefficient of variation (CV) of SHAP values for a classifier.
+    
+    Parameters:
+    model : object
+        The classifier for which SHAP values are to be calculated.
+    test_dataset : pandas.DataFrame
+        The test_dataset for which SHAP values are to be calculated.
 
+    Returns:
+    float or None
+        The coefficient of variation of the absolute SHAP values, 
+        or None if SHAP values cannot be calculated.
     """
-     
-    # Create a background dataset (subset of your training data)
-    background = shap.sample(dataset, 100)  # Using 100 samples for background
+    
+    # Create a background dataset by sampling 100 samples from the provided test_dataset
+    background = shap.sample(test_dataset, 100)
 
     # Initialize KernelExplainer with the prediction function and background dataset
-    explainer = shap.KernelExplainer(predict(clf), background)
+    explainer = shap.KernelExplainer(predict(model), background)
 
-    # Calculate SHAP values for the dataset you want to explain
-    shap_values = explainer.shap_values(dataset.iloc[0])
+    # Calculate SHAP values for the first instance in the dataset
+    shap_values = explainer.shap_values(test_dataset.iloc[0])
   
-    # calculare variance of absolute shap values 
+    # Calculate the coefficient of variation of absolute SHAP values if they exist
     if shap_values is not None and len(shap_values) > 0:
+        # Calculate the sum of absolute SHAP values for each class
         sums = np.array([abs(shap_values[i]).sum() for i in range(len(shap_values))])
+        # Calculate the coefficient of variation (CV)
         cv = np.std(sums) / np.mean(sums)
         return cv
     
-    else: return None
+    else:
+        return None  # Return None if SHAP values cannot be calculated
+
